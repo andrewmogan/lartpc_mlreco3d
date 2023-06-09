@@ -33,6 +33,31 @@ class CRTTPCMatcherInterface:
                             crthits,
                             use_true_tpc_objects=False,
                             restrict_interactions=[]):
+        """
+        If CRT-TPC matching has not yet been computed for this volume, then it will
+        be run as part of this function. Otherwise, CRT-TPC matching results are
+        cached in `self.crt_tpc_matches` per volume.
+
+        If `restrict_interactions` is specified, no caching is done.
+
+        Parameters
+        ==========
+        entry: int
+        interactions: list
+            Interaction list
+        crthits: list
+            List of CRTHits
+        use_true_tpc_objects: bool, default is False
+            Whether to use true or predicted interactions.
+        volume: int, default is None
+        restrict_interactions: list, default is []
+           If specified, the interactions to match will be whittle down to this subset of interactions.
+           Provide list of interaction ids.
+
+        Returns
+        =======
+        list of matcha.MatchCandidates
+        """
 
         # No caching done if matching a subset of interactions
         if (entry, use_true_tpc_objects) not in self.crt_tpc_matches or len(restrict_interactions):
@@ -56,6 +81,25 @@ class CRTTPCMatcherInterface:
                               use_true_tpc_objects=False,
                               volume=None,
                               restrict_interactions=[]):
+        """
+        Parameters
+        ==========
+        entry: int
+        interactions: list
+            Interaction list
+        crthits: list
+            List of CRTHits
+        use_true_tpc_objects: bool, default is False
+            Whether to use true or predicted interactions.
+        volume: int, default is None
+        restrict_interactions: list, default is []
+           If specified, the interactions to match will be whittle down to this subset of interactions.
+           Provide list of interaction ids.
+
+        Returns
+        =======
+        list of matcha.MatchCandidates
+        """
 
         if use_true_tpc_objects:
             if not hasattr(self, 'get_true_interactions'):
@@ -78,11 +122,9 @@ class CRTTPCMatcherInterface:
 
         trk_v = self.crt_tpc_manager.make_tpctrack(muon_candidates)
         crthit_keys = self.crthit_keys
-        #crt_v = self.crt_tpc_manager.make_crthit([crthits[key][entry] for key in crthit_keys])
         crt_v = self.crt_tpc_manager.make_crthit([crthits[key] for key in crthit_keys])
 
-
-        matches = self.crt_tpc_manager.run_crt_tpc_matching(trk_v, crt_v)
+        matches = self.crt_tpc_manager.run_crt_tpc_matching(trk_v, crt_v, self.crt_tpc_config)
 
         if len(restrict_interactions) == 0:
             self.crt_tpc_matches[(entry, use_true_tpc_objects)] = (matches)
@@ -92,7 +134,7 @@ class CRTTPCMatcherInterface:
     def _is_contained(self, points, bounds, threshold=30):
         """
         Parameters
-        ----------
+        ==========
         points: np.ndarray
             Shape (N, 3). Coordinates in voxel units.
         threshold: float or np.ndarray
@@ -101,7 +143,7 @@ class CRTTPCMatcherInterface:
             threshold must be applied in x, y and z (shape (3,)).
 
         Returns
-        -------
+        =======
         bool
         """
         if not isinstance(threshold, np.ndarray):
@@ -127,37 +169,26 @@ class CRTTPCManager:
 
     Attributes
     ==========
+    cfg: dict
+        Model config file
+    crt_tpc_config: dict
+        Analysis config file with CRT information included
 
     Methods
     =======
+    make_crthit(larcv_crthits, minimum_pe):
+        Convert larcv.CRTHits into matcha.CRTHits
+    make_tpctrack(muon_candidates):
+        Create matcha.Track instances from Interaction.Particles
+    run_crt_tpc_matching(tracks, crthits, crt_tpc_config):
+        Call matcha's match-making algorithm 
     """
     def __init__(self, cfg, crt_tpc_config):
-        """
-        Constructor
-
-        Parameters
-        ==========
-        cfg: dict
-            The full chain config.
-
-        Methods
-        =======
-        TODO INSERT
-        """
         self.cfg = cfg
 
         # Setup matcha config parameters
-        self.crt_tpc_config       = crt_tpc_config
-
-        self.distance_threshold   = self.crt_tpc_config.get('distance_threshold', 50)
-        self.dca_method           = self.crt_tpc_config.get('dca_method', 'simple')
-        self.direction_method     = self.crt_tpc_config.get('direction_method', 'pca')
-        self.pca_radius           = self.crt_tpc_config.get('pca_radius', 10)
-        self.min_points_in_radius = self.crt_tpc_config.get('min_points_in_radius', 10)
-        self.trigger_timestamp    = self.crt_tpc_config.get('trigger_timestamp', None)
-        self.isdata               = self.crt_tpc_config.get('isdata', False)
-        self.save_to_file         = self.crt_tpc_config.get('save_to_file', False)
-        self.file_path            = self.crt_tpc_config.get('file_path', '.')
+        self.crt_tpc_config     = crt_tpc_config
+        self.matcha_config_path = self.crt_tpc_config['matcha_config_path']
 
         self.crt_tpc_matches = None
         self.tpc_v, self.crt_v, = None, None 
@@ -230,9 +261,6 @@ class CRTTPCManager:
             points         = particle.points
             start_point    = particle.start_point.reshape(1, 3)
             end_point      = particle.end_point.reshape(1, 3)
-            # points         = self.points_to_cm(particle.points)
-            # start_point    = self.points_to_cm(particle.start_point.reshape(1, 3))
-            # end_point      = self.points_to_cm(particle.end_point.reshape(1, 3))
             track_id       = particle.id
             image_id       = particle.image_id
             interaction_id = particle.interaction_id
@@ -262,59 +290,31 @@ class CRTTPCManager:
         self.tpc_v = tpc_v
         return tpc_v
 
-    def run_crt_tpc_matching(self, tracks, crthits):
+    def run_crt_tpc_matching(self, tracks, crthits, crt_tpc_config):
         """
         Call matcha's match-making function
 
         Parameters
-        ----------
-        tracks: list of matcha.Track instances
-        crthits: list of matcha.CRTHit instances
+        ==========
+        tracks: list 
+            List of matcha.Track instances
+        crthits: list 
+            List of matcha.CRTHit instances
+        crt_tpc_config: dict
+            Parsed analysis config file
 
         Returns
-        -------
+        =======
         list of matcha.MatchCandidate instances containing matched Track and
         CRTHit objects
         """
         from matcha import match_maker
 
-        crt_tpc_matches = match_maker.get_track_crthit_matches(
-            tracks, crthits, 
-            approach_distance_threshold=self.distance_threshold, 
-            direction_method=self.direction_method, 
-            dca_method=self.dca_method, 
-            pca_radius=self.pca_radius, 
-            min_points_in_radius=self.min_points_in_radius,
-            trigger_timestamp=self.trigger_timestamp, 
-            isdata=self.isdata,
-            save_to_file=self.save_to_file, 
-            file_path=self.file_path
-        )
+        matcha_config_path = crt_tpc_config['matcha_config_path']
+
+        crt_tpc_matches = match_maker.get_track_crthit_matches(tracks, crthits, matcha_config_path)
         return crt_tpc_matches
 
-    # def points_to_cm(self, points):
-    #     """
-    #     Convert particle points from voxel units to cm
-
-    #     Parameters
-    #     ----------
-    #     points: np.ndarray
-    #         Shape (N, 3). Coordinates in voxel units.
-
-    #     Returns
-    #     -------
-    #     np.ndarray
-    #         Shape (N, 3). Coordinates in cm.
-    #     """
-    #     if points.shape[1] != 3:
-    #         raise ValueError("points should have shape (N,3) but has shape {}".format(points.shape))
-    #     points_in_cm = np.zeros(shape=(len(points), 3))
-    #     for ip, point in enumerate(points):
-    #         points_in_cm[ip][0] = point[0] * self.size_voxel_x + self.min_x
-    #         points_in_cm[ip][1] = point[1] * self.size_voxel_y + self.min_y
-    #         points_in_cm[ip][2] = point[2] * self.size_voxel_z + self.min_z
-
-    #     return points_in_cm
 
 
 
