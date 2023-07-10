@@ -2,7 +2,7 @@ import numpy as np
 
 from typing import Counter, List, Union
 from . import Particle
-from mlreco.utils.globals import PDG_TO_PID
+from mlreco.utils.globals import PDG_TO_PID, SHAPE_LABELS
 from functools import cached_property
 
 class TruthParticle(Particle):
@@ -17,13 +17,13 @@ class TruthParticle(Particle):
     ----------
     depositions_MeV : np.ndarray
         (N) Array of energy deposition values for each voxel in MeV
-    true_index : np.ndarray, default np.array([])
+    truth_index : np.ndarray, default np.array([])
         (N) IDs of voxels that correspond to the particle within the label tensor
-    true_points : np.dnarray, default np.array([], shape=(0,3))
+    truth_points : np.dnarray, default np.array([], shape=(0,3))
         (N,3) Set of voxel coordinates that make up this particle in the label tensor
-    true_depositions : np.ndarray
+    truth_depositions : np.ndarray
         (N) Array of charge deposition values for each true voxel
-    true_depositions_MeV : np.ndarray
+    truth_depositions_MeV : np.ndarray
         (N) Array of energy deposition values for each true voxel in MeV
     start_position : np.ndarray
         True start position of the particle
@@ -41,8 +41,11 @@ class TruthParticle(Particle):
                  is_primary: bool = False,
                  truth_index: np.ndarray = np.empty(0, dtype=np.int64), 
                  truth_points: np.ndarray = np.empty((0,3), dtype=np.float32),
+                 sed_index: np.ndarray = np.empty(0, dtype=np.int64), 
+                 sed_points: np.ndarray = np.empty((0, 3), dtype=np.float32),
                  truth_depositions: np.ndarray = np.empty(0, dtype=np.float32),
                  truth_depositions_MeV: np.ndarray = np.empty(0, dtype=np.float32),
+                 sed_depositions: np.ndarray = np.empty(0, dtype=np.float32),
                  particle_asis: object = None, 
                  length_tng: float = -1.,
                  csda_kinetic_energy_tng: float = -1.,
@@ -57,12 +60,19 @@ class TruthParticle(Particle):
         self.depositions_MeV        = np.atleast_1d(depositions_MeV)
         self.truth_index            = truth_index
         self.truth_points           = truth_points
+        self.sed_index              = sed_index
+        self.sed_points             = sed_points
+        self.sed_depositions        = np.atleast_1d(sed_depositions)
+        self._sed_size              = sed_points.shape[0]
         self._truth_size            = truth_points.shape[0]
         self._truth_depositions     = np.atleast_1d(truth_depositions)   # Must be ADC
         self._truth_depositions_MeV = np.atleast_1d(truth_depositions_MeV)   # Must be MeV
+        
+        self._children_counts = np.zeros(len(SHAPE_LABELS), dtype=np.int64)
 
         self.asis = particle_asis
-        assert PDG_TO_PID[int(self.asis.pdg_code())] == self.pid
+        # print(self.pid, PDG_TO_PID[int(self.asis.pdg_code())])
+        assert (PDG_TO_PID[int(self.asis.pdg_code())] == self.pid) or (self.pid == -1)
             
         # Quantities to be set during post-processing
         # tng stands for true nonghost
@@ -94,8 +104,16 @@ class TruthParticle(Particle):
         return 'Truth'+msg
     
     @property
+    def children_counts(self):
+        return self._children_counts
+    
+    @property
     def truth_size(self):
         return self._truth_size
+    
+    @property
+    def sed_size(self):
+        return self._sed_size
     
     @property
     def truth_depositions(self):

@@ -51,7 +51,7 @@ def calorimetric_energy(data_dict,
                  result_capture_optional=['truth_particles'])
 def range_based_track_energy(data_dict, result_dict,
                              bin_size=17, 
-                             include_pids=[2, 3, 4],
+                             include_pids=[2, 4],
                              data=False,
                              min_points=5,
                              mode='px'):
@@ -69,8 +69,6 @@ def range_based_track_energy(data_dict, result_dict,
     include_pids : list, optional
         Particle PDG codes (converted to 0-5 labels) to include in 
         computing the energies, by default [2, 3, 4]
-    table_path : str, optional
-        Path to muon/proton/pion CSDARange vs. energy table, by default ''
 
     Returns
     -------
@@ -94,35 +92,44 @@ def range_based_track_energy(data_dict, result_dict,
 
     for i, p in enumerate(particles):
         if p.semantic_type == 1 and p.pid in include_pids:
-            if mode == 'cm':
-                points = p.points
-                bin_size_cm = bin_size
-            else:
-                points = _pix_to_cm(p.points, meta)
-                bin_size_cm = bin_size * px_to_cm
+            # if mode == 'cm':
+            points = p.points
+            # bin_size_cm = bin_size
+            # else:
+            #     points = _pix_to_cm(p.points, meta)
+            #     bin_size_cm = bin_size * px_to_cm
             if points.shape[0] > min_points:
-                length = compute_track_length(points, bin_size=bin_size_cm)
+                length = compute_track_length(points, bin_size=bin_size)
                 p.length = length
-                p.csda_kinetic_energy = splines[p.pid](length)
+                if mode == 'cm':
+                    p.csda_kinetic_energy = float(splines[p.pid](length))
+                else:
+                    p.csda_kinetic_energy = float(splines[p.pid](length * px_to_cm))
 
     for i, p in enumerate(truth_particles):
         if p.semantic_type == 1 and p.pid in include_pids:
-            if mode == 'cm':
-                pts = p.points
-                tng_pts = p.truth_points
-                bin_size_cm = bin_size
-            else:
-                pts = _pix_to_cm(p.points, meta)
-                tng_pts = _pix_to_cm(p.truth_points, meta)
-                bin_size_cm = bin_size * px_to_cm
+            # if mode == 'cm':
+            pts = p.points
+            tng_pts = p.truth_points
+                # bin_size_cm = bin_size
+            # else:
+            #     pts = _pix_to_cm(p.points, meta)
+            #     tng_pts = _pix_to_cm(p.truth_points, meta)
+            #     bin_size_cm = bin_size * px_to_cm
             if pts.shape[0] > min_points:
-                length = compute_track_length(pts, bin_size=bin_size_cm)
+                length = compute_track_length(pts, bin_size=bin_size)
                 p.length = float(length)
-                p.csda_kinetic_energy = float(splines[p.pid](length))
+                if mode == 'cm':
+                    p.csda_kinetic_energy = float(splines[p.pid](length))
+                else:
+                    p.csda_kinetic_energy = float(splines[p.pid](length * px_to_cm))
             if tng_pts.shape[0] > min_points:
-                length_tng = compute_track_length(tng_pts, bin_size=bin_size_cm)
+                length_tng = compute_track_length(tng_pts, bin_size=bin_size)
                 p.length_tng = float(length_tng)
-                p.csda_kinetic_energy_tng = float(splines[p.pid](length_tng))
+                if mode == 'cm':
+                    p.csda_kinetic_energy_tng = float(splines[p.pid](length_tng))
+                else:
+                    p.csda_kinetic_energy_tng = float(splines[p.pid](length_tng * px_to_cm))
             
     return {}
 
@@ -282,6 +289,9 @@ def compute_curve(points, s=None, bin_size=20):
 
     return u.squeeze(), sppoints, splines, length
 
+def compute_track_length_splines(points, bin_size=17):
+    _, _, _, length = compute_curve(points, bin_size=bin_size)
+    return length
 
 def compute_track_length(points, bin_size=17):
     """Compute track length by dividing it into segments and computing 

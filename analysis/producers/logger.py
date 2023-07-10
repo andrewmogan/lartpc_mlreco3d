@@ -38,14 +38,19 @@ class AnalysisLogger:
         self._data_producers = []
 
     def prepare(self):
-        for fname, args_dict in self.fieldnames.items():
-            if args_dict is None:
-                f = getattr(self, fname)
-            else:
-                assert 'args' in args_dict
-                kwargs = args_dict['args']
-                f = partial(getattr(self, fname), **kwargs)
+        for name in self.fieldnames:
+            f = getattr(self, name)
             self._data_producers.append(f)
+
+    # def prepare(self):
+    #     for fname, args_dict in self.fieldnames.items():
+    #         if args_dict is None:
+    #             f = getattr(self, fname)
+    #         else:
+    #             assert 'args' in args_dict
+    #             kwargs = args_dict['args']
+    #             f = partial(getattr(self, fname), **kwargs)
+    #         self._data_producers.append(f)
 
     def produce(self, particle, mode=None):
 
@@ -69,33 +74,9 @@ class AnalysisLogger:
 
 class ParticleLogger(AnalysisLogger):
 
-    def __init__(self, fieldnames: dict, meta=None, units='px'):
+    def __init__(self, fieldnames: dict, meta=None):
         super(ParticleLogger, self).__init__(fieldnames)
         self.meta = meta
-        
-        self.vb = np.zeros((3, 2))
-        self.vb[:, 0] = -float('inf')
-        self.vb[:, 1] = float('inf')
-        
-        if meta is not None:
-            if units == 'px':
-                min_x, min_y, min_z = self.meta[0:3]
-                size_voxel_x, size_voxel_y, size_voxel_z = self.meta[6:9]
-
-                self.vb[0, :] = (self.vb[0, :] - min_x) / size_voxel_x
-                self.vb[1, :] = (self.vb[1, :] - min_y) / size_voxel_y
-                self.vb[2, :] = (self.vb[2, :] - min_z) / size_voxel_z
-            elif units == 'cm':
-                min_x, min_y, min_z = self.meta[0:3]
-                max_x, max_y, max_z = self.meta[3:6]
-
-                self.vb[0, 0], self.vb[0, 1] = min_x, max_x
-                self.vb[1, 0], self.vb[1, 1] = min_y, max_y
-                self.vb[2, 0], self.vb[2, 1] = min_z, max_z
-            else:
-                raise ValueError(f"Invalid unit {units}, must be either cm or px.")
-            
-        self._units = units
 
     @staticmethod
     def id(particle):
@@ -107,12 +88,19 @@ class ParticleLogger(AnalysisLogger):
     @staticmethod
     def interaction_id(particle):
         out = {'particle_interaction_id': -1}
-        if hasattr(particle, 'interaction_id'):
+        if hasattr(particle, 'interaction_id')  :
             out['particle_interaction_id'] = particle.interaction_id
+        return out
+    
+    @staticmethod
+    def nu_id(particle):
+        out = {'particle_nu_id': -1}
+        if hasattr(particle, 'nu_id'):
+            out['particle_nu_id'] = particle.nu_id
         return out
 
     @staticmethod
-    def pdg_type(particle):
+    def pid(particle):
         out = {'particle_type': -1}
         if hasattr(particle, 'pid'):
             out['particle_type'] = particle.pid
@@ -260,12 +248,38 @@ class ParticleLogger(AnalysisLogger):
     
     @staticmethod
     @tag('true')
+    def energy_deposit(particle):
+        out = {
+            'energy_deposit': -1,
+        }
+        if type(particle) is TruthParticle:
+            out['energy_deposit'] = particle.energy_deposit
+        return out
+    
+    @staticmethod
+    @tag('true')
     def num_children(particle):
         out = {
             'num_children': -1,
         }
         if type(particle) is TruthParticle:
             out['num_children'] = len(particle.asis.children_id())
+        return out
+    
+    @staticmethod
+    @tag('true')
+    def children_counts(particle):
+        out = {'children_counts_0': -1,
+               'children_counts_1': -1,
+               'children_counts_2': -1,
+               'children_counts_3': -1,
+               'children_counts_4': -1}
+        if type(particle) is TruthParticle:
+            out['children_counts_0'] = particle._children_counts[0]
+            out['children_counts_1'] = particle._children_counts[1]
+            out['children_counts_2'] = particle._children_counts[2]
+            out['children_counts_3'] = particle._children_counts[3]
+            out['children_counts_4'] = particle._children_counts[4]
         return out
     
     @staticmethod
@@ -342,33 +356,9 @@ class ParticleLogger(AnalysisLogger):
 
 class InteractionLogger(AnalysisLogger):
 
-    def __init__(self, fieldnames: dict, meta=None, units='px'):
+    def __init__(self, fieldnames: dict, meta=None):
         super(InteractionLogger, self).__init__(fieldnames)
         self.meta = meta
-        
-        self.vb = np.zeros((3, 2))
-        self.vb[:, 0] = -float('inf')
-        self.vb[:, 1] = float('inf')
-        
-        if meta is not None:
-            if units == 'px':
-                min_x, min_y, min_z = self.meta[0:3]
-                size_voxel_x, size_voxel_y, size_voxel_z = self.meta[6:9]
-
-                self.vb[0, :] = (self.vb[0, :] - min_x) / size_voxel_x
-                self.vb[1, :] = (self.vb[1, :] - min_y) / size_voxel_y
-                self.vb[2, :] = (self.vb[2, :] - min_z) / size_voxel_z
-            elif units == 'cm':
-                min_x, min_y, min_z = self.meta[0:3]
-                max_x, max_y, max_z = self.meta[3:6]
-
-                self.vb[0, 0], self.vb[0, 1] = min_x, max_x
-                self.vb[1, 0], self.vb[1, 1] = min_y, max_y
-                self.vb[2, 0], self.vb[2, 1] = min_z, max_z
-            else:
-                raise ValueError(f"Invalid unit {units}, must be either cm or px.")
-            
-        self._units = units
 
     @staticmethod
     def id(ia):
@@ -416,8 +406,12 @@ class InteractionLogger(AnalysisLogger):
             out = {mapping[pid] : -1 for pid in ptypes}
 
         if ia is not None:
-            for pid in ptypes:
-                out[mapping[pid]] = ia.primary_counts[pid]
+            if type(ia) is Interaction:
+                for pid in ptypes:
+                    out[mapping[pid]] = ia.primary_counts[pid]
+            if type(ia) is TruthInteraction:
+                for pid in ptypes:
+                    out[mapping[pid]] = ia.truth_primary_counts[pid]
             
         return out
     
@@ -439,8 +433,12 @@ class InteractionLogger(AnalysisLogger):
             out = {mapping[pid] : -1 for pid in ptypes}
 
         if ia is not None:
-            for pid in ptypes:
-                out[mapping[pid]] = ia.primary_counts[pid]
+            if type(ia) is Interaction:
+                for pid in ptypes:
+                    out[mapping[pid]] = ia.primary_counts[pid]
+            if type(ia) is TruthInteraction:
+                for pid in ptypes:
+                    out[mapping[pid]] = ia.truth_primary_counts[pid]
             
         return out
     

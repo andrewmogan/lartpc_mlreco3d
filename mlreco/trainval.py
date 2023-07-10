@@ -1,4 +1,4 @@
-import os, re, warnings
+import os, re, glob, warnings
 import torch
 from collections import defaultdict
 
@@ -96,7 +96,6 @@ class trainval(object):
             self._net.module.update_buffers()
 
     def save_state(self, iteration):
-        self._watch.start('save')
         if len(self._weight_prefix) > 0:
             filename = '%s-%d.ckpt' % (self._weight_prefix, iteration)
             torch.save({
@@ -104,7 +103,6 @@ class trainval(object):
                 'state_dict': self._net.state_dict(),
                 'optimizer': self._optimizer.state_dict()
             }, filename)
-        self._watch.stop('save')
 
 
     def get_data_minibatched(self,data_iter):
@@ -267,7 +265,7 @@ class trainval(object):
             #    data.append([data_blob[key][i] for key in input_keys])
 
             self._watch.start('forward')
-            # self._watch.start_cpu('forward_cpu')
+            self._watch.start_cpu('forward_cpu')
 
             if not len(self._gpus):
                 train_blob = train_blob[0]
@@ -290,7 +288,7 @@ class trainval(object):
                     self._loss.append(loss_acc['loss'])
 
             self._watch.stop('forward')
-            # self._watch.stop_cpu('forward_cpu')
+            self._watch.stop_cpu('forward_cpu')
             self.tspent_sum['forward'] += self._watch.time('forward')
 
             # Record results
@@ -405,10 +403,10 @@ class trainval(object):
             #print(self._net.state_dict().keys())
             for module, model_path, model_name in model_paths:
                 if not os.path.isfile(model_path):
-                    if self._train:
-                        raise ValueError('File not found: %s for module %s\n' % (model_path, module))
-                    else:
+                    if len(glob.glob(model_path)):
                         continue
+                    else:
+                        raise ValueError('File not found: %s for module %s\n' % (model_path, module))
                 print('Restoring weights for %s from %s...' % (module,model_path))
                 with open(model_path, 'rb') as f:
                     checkpoint = torch.load(f, map_location='cpu')

@@ -7,6 +7,7 @@ from mlreco.trainval import trainval
 from mlreco.main_funcs import cycle, process_config
 from mlreco.iotools.readers import HDF5Reader
 from mlreco.iotools.writers import CSVWriter, HDF5Writer
+from mlreco.utils import pixel_to_cm
 from mlreco.utils.globals import *
 
 from analysis import post_processing
@@ -51,7 +52,7 @@ class AnaToolsManager:
         self.max_iteration = self.ana_config['analysis']['iteration']
         self.log_dir       = self.ana_config['analysis']['log_dir']
         self.ana_mode      = self.ana_config['analysis'].get('run_mode', 'all')
-        self.spatial_units = self.ana_config['analysis'].get('spatial_units', 'px')
+        self.convert_to_cm = self.ana_config['analysis'].get('convert_to_cm', False)
 
         # Initialize data product builders
         self.data_builders = None
@@ -62,7 +63,7 @@ class AnaToolsManager:
                 if builder_name not in SUPPORTED_BUILDERS:
                     msg = f"{builder_name} is not a valid data product builder!"
                     raise ValueError(msg)
-                builder = eval(builder_name)(spatial_units=self.spatial_units)
+                builder = eval(builder_name)(convert_to_cm=self.convert_to_cm)
                 self.builders[builder_name] = builder
 
         self._data_reader  = None
@@ -118,9 +119,11 @@ class AnaToolsManager:
         else:
             # If there is a reader, simply load reconstructed data
             file_keys = self.ana_config['reader']['file_keys']
+            n_entry = self.ana_config['reader'].get('n_entry', -1)
+            n_skip = self.ana_config['reader'].get('n_skip', -1)
             entry_list = self.ana_config['reader'].get('entry_list', [])
             skip_entry_list = self.ana_config['reader'].get('skip_entry_list', [])
-            Reader = HDF5Reader(file_keys, entry_list, skip_entry_list, True)
+            Reader = HDF5Reader(file_keys, n_entry, n_skip, entry_list, skip_entry_list, to_larcv=True)
             self._data_reader = Reader
             self._reader_state = 'hdf5'
             self._set_iteration(Reader)
@@ -159,24 +162,14 @@ class AnaToolsManager:
         else:
             raise ValueError(f"Data reader {self._reader_state} is not supported!")
         return data, res
-    
-    
+
+
     @staticmethod
-    def _pix_to_cm(arr, meta):
-        
-        min_x        = meta[0]
-        min_y        = meta[1]
-        min_z        = meta[2]
-        size_voxel_x = meta[6]
-        size_voxel_y = meta[7]
-        size_voxel_z = meta[8]
-        
-        arr[:, COORD_COLS[0]] = arr[:, COORD_COLS[0]] * size_voxel_x + min_x
-        arr[:, COORD_COLS[1]] = arr[:, COORD_COLS[1]] * size_voxel_y + min_y
-        arr[:, COORD_COLS[2]] = arr[:, COORD_COLS[2]] * size_voxel_z + min_z
+    def pixel_to_cm(arr, meta):
+        arr[:, COORD_COLS] = pixel_to_cm(arr[:, COORD_COLS], meta)
         return arr
     
-    
+
     def convert_pixels_to_cm(self, data, result):
         """Convert pixel coordinates to real world coordinates (in cm)
         for all tensors that have spatial coordinate information, using 
@@ -208,12 +201,14 @@ class AnaToolsManager:
         meta = data['meta'][0]
         assert len(meta) == 9
         
+        print("Converting units from px to cm...")
+        
         for key, val in data.items():
             if key in data_has_voxels:
-                data[key] = [self._pix_to_cm(arr, meta) for arr in val]
+                data[key] = [self.pixel_to_cm(arr, meta) for arr in val]
         for key, val in result.items():
             if key in result_has_voxels:
-                result[key] = [self._pix_to_cm(arr, meta) for arr in val]
+                result[key] = [self.pixel_to_cm(arr, meta) for arr in val]
     
     
     def _build_reco_reps(self, data, result):
@@ -326,12 +321,14 @@ class AnaToolsManager:
         """
         if 'ParticleBuilder' in self.builders:
             if 'particles' not in result:
+                print("Building particles instead of loading...")
                 result['particles']         = self.builders['ParticleBuilder'].build(data, result, mode='reco')
             else:
                 result['particles']         = self.builders['ParticleBuilder'].load(data, result, mode='reco')
 
         if 'InteractionBuilder' in self.builders:
             if 'interactions' not in result:
+                print("Building interactions instead of loading...")
                 result['interactions']      = self.builders['InteractionBuilder'].build(data, result, mode='reco')
             else:
                 result['interactions']      = self.builders['InteractionBuilder'].load(data, result, mode='reco')          
@@ -380,10 +377,10 @@ class AnaToolsManager:
 
     def initialize_flash_manager(self):
         
-        if not self.spatial_units == 'cm':
-            msg = "Need to convert px to cm spatial units before running flash "\
-                "matching. Set spatial_units: cm in analysis config. "
-            raise AssertionError(msg)
+        # if not self.convert_to_cm == 'cm':
+        #     msg = "Need to convert px to cm spatial units before running flash "\
+        #         "matching. Set spatial_units: cm in analysis config. "
+        #     raise AssertionError(msg)
         
         # Only run once, to save time
         if not self.flash_manager_initialized:
@@ -406,10 +403,10 @@ class AnaToolsManager:
 
     def initialize_crt_tpc_manager(self):
         
-        if not self.spatial_units == 'cm':
-            msg = "Need to convert px to cm spatial units before running CRT "\
-                "matching. Set spatial_units: cm in analysis config. "
-            raise AssertionError(msg)
+        # if not self.convert_to_cm == 'cm':
+        #     msg = "Need to convert px to cm spatial units before running CRT "\
+        #         "matching. Set spatial_units: cm in analysis config. "
+        #     raise AssertionError(msg)
         
         # Only run once, to save time
         if not self.crt_tpc_manager_initialized:
@@ -430,7 +427,7 @@ class AnaToolsManager:
             self.crt_tpc_manager_initialized = True
         
         
-    def run_post_processing(self, data, result):
+    def run_post_processing(self, data, result, verbose=False):
         """Run all registered post-processing scripts.
 
         Parameters
@@ -476,7 +473,8 @@ class AnaToolsManager:
                 post_processor_interface.register_function(processor, 
                                                            priority,
                                                            processor_cfg=local_pcfg,
-                                                           profile=profile)
+                                                           profile=profile,
+                                                           verbose=verbose)
 
             post_processor_interface.process_and_modify()
             self.logger_dict.update(post_processor_interface._profile)
@@ -584,7 +582,26 @@ class AnaToolsManager:
         self.logger_dict['forward_time'] = dt
         
         # 1-a. Convert units
-        if self.spatial_units == 'cm':
+        
+        # Dumb check for repeated coordinate conversion. TODO: Fix
+        if 'input_rescaled' in res: 
+            example_coords = res['input_rescaled'][0][:, COORD_COLS]
+        elif 'input_data' in data:
+            example_coords = data['input_data'][0][:, COORD_COLS]
+        else:
+            msg = "Must have some coordinate information 'input_rescaled' "\
+                "in res, or 'input_data' in data) to reconstruct quantities!"
+            raise KeyError(msg)
+            
+        rounding_error = (example_coords - example_coords.astype(int)).sum() 
+        
+        if self.convert_to_cm and abs(rounding_error) > 1e-6:
+            msg = "It looks like the input data has coordinates already "\
+                "translated to cm from pixels, and you are trying to convert "\
+                "coordinates again. You might want to set convert_to_cm = False."
+            raise AssertionError(msg)
+        
+        if self.convert_to_cm:
             self.convert_pixels_to_cm(data, res)
 
         # 2. Build data representations'
@@ -647,6 +664,7 @@ class AnaToolsManager:
 
 
     def run(self):
+        print(self.max_iteration)
         for iteration in range(self.max_iteration):
             self.step(iteration)
             if self.profile:

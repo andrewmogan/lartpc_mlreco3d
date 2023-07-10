@@ -18,9 +18,16 @@ class TruthInteraction(Interaction):
 
     Attributes
     ----------
-    depositions_MeV : np.ndarray, default np.array([])
-        Similar as `depositions`, i.e. using adapted true labels.
-        Using true MeV energy deposits instead of rescaled ADC units.
+    depositions_MeV : np.ndarray
+        (N) Array of energy deposition values for each voxel in MeV
+    truth_index : np.ndarray, default np.array([])
+        (N) IDs of voxels that correspond to the interaction within the label tensor
+    truth_points : np.dnarray, default np.array([], shape=(0,3))
+        (N,3) Set of voxel coordinates that make up this interaction in the label tensor
+    truth_depositions : np.ndarray
+        (N) Array of charge deposition values for each true voxel
+    truth_depositions_MeV : np.ndarray
+        (N) Array of energy deposition values for each true voxel in MeV
     """
 
     def __init__(self,
@@ -29,8 +36,11 @@ class TruthInteraction(Interaction):
                  depositions_MeV : np.ndarray = np.empty(0, dtype=np.float32),
                  truth_index: np.ndarray = np.empty(0, dtype=np.int64),
                  truth_points: np.ndarray = np.empty((0,3), dtype=np.float32),
+                 sed_index: np.ndarray = np.empty(0, dtype=np.int64),
+                 sed_points: np.ndarray = np.empty((0,3), dtype=np.float32),
                  truth_depositions: np.ndarray = np.empty(0, dtype=np.float32),
                  truth_depositions_MeV: np.ndarray = np.empty(0, dtype=np.float32),
+                 sed_depositions: np.ndarray = np.empty(0, dtype=np.float32),
                  nu_interaction_type: int = -1,
                  nu_interaction_mode: int = -1,
                  nu_current_type: int = -1,
@@ -51,6 +61,11 @@ class TruthInteraction(Interaction):
             self._truth_depositions_MeV  = truth_depositions_MeV
             self.truth_points = truth_points
             self.truth_index = truth_index
+
+            self.sed_index              = sed_index
+            self.sed_points             = sed_points
+            self.sed_depositions        = np.atleast_1d(sed_depositions)
+            self._sed_size              = sed_points.shape[0]
             
         # Invoke particles setter
         super(TruthInteraction, self).__init__(interaction_id, particles, **kwargs)
@@ -80,20 +95,33 @@ class TruthInteraction(Interaction):
         if value is not None:
             self._particles = {p.id : p for p in value}
             id_list, index_list, points_list, depositions_list = [], [], [], []
+
             true_index_list, true_points_list = [], []
             true_depositions_list, true_depositions_MeV_list = [], []
             depositions_MeV_list = []
+
+            sed_index_list, sed_points_list = [], []
+            sed_depositions_list = []
             for p in value:
                 self.check_particle_input(p)
                 id_list.append(p.id)
+
+                # Predicted Nonghost
                 index_list.append(p.index)
                 points_list.append(p.points)
                 depositions_list.append(p.depositions)
                 depositions_MeV_list.append(p.depositions_MeV)
+
+                # True Nonghost
                 true_index_list.append(p.truth_index)
                 true_points_list.append(p.truth_points)
                 true_depositions_list.append(p.truth_depositions)
                 true_depositions_MeV_list.append(p.truth_depositions_MeV)
+
+                # SED
+                sed_index_list.append(p.sed_index)
+                sed_points_list.append(p.sed_points)
+                sed_depositions_list.append(p.sed_depositions)
 
                 if p.pid >= 0:
                     self._truth_particle_counts[p.pid] += 1
@@ -120,22 +148,30 @@ class TruthInteraction(Interaction):
             self._depositions_MeV       = np.atleast_1d(np.concatenate(depositions_MeV_list))
             self._truth_depositions     = np.atleast_1d(np.concatenate(true_depositions_list))
             self._truth_depositions_MeV = np.atleast_1d(np.concatenate(true_depositions_MeV_list))
+            self.sed_index              = np.atleast_1d(np.concatenate(sed_index_list))
+            self.sed_points             = np.atleast_1d(np.concatenate(sed_points_list))
+            self.sed_depositions        = np.atleast_1d(np.concatenate(sed_depositions_list))
         
     @classmethod
     def from_particles(cls, particles, verbose=False, **kwargs):
         
         assert len(particles) > 0
         init_args = defaultdict(list)
-        reserved_attributes = [
-            'interaction_id', 'nu_id', 'volume_id', 
-            'image_id', 'points', 'index', 'depositions', 'depositions_MeV',
-            'truth_depositions_MeV', 'truth_depositions', 'truth_index'
-        ]
+        # Particle-level attributes that needs to be processed
+        reserved_attributes = ['interaction_id', 
+                               'nu_id', 
+                               'volume_id', 
+                               'image_id',
+                               'index', 'points', 'depositions',
+                               'truth_index', 'truth_points', 
+                               'truth_depositions','truth_depositions_MeV',
+                               'sed_index', 'sed_points', 'sed_depositions']
         
         processed_args = {'particles': []}
         for key, val in kwargs.items():
             processed_args[key] = val
         for p in particles:
+            # print(p.sed_depositions)
             assert type(p) is TruthParticle
             for key in reserved_attributes:
                 if key not in kwargs:
@@ -144,10 +180,18 @@ class TruthInteraction(Interaction):
         
         _process_interaction_attributes(init_args, processed_args, **kwargs)
         
+        # print(init_args)
+        
         # Handle depositions_MeV for TruthParticles
-        processed_args['depositions_MeV']       = np.concatenate(init_args['depositions_MeV'])
-        processed_args['truth_depositions']     = np.concatenate(init_args['truth_depositions'])
-        processed_args['truth_depositions_MeV'] = np.concatenate(init_args['truth_depositions_MeV'])
+        processed_args['truth_index']             = np.concatenate(init_args['truth_index'])
+        processed_args['truth_points']            = np.vstack(init_args['truth_points'])
+        
+        processed_args['truth_depositions']       = np.concatenate(init_args['truth_depositions'])
+        processed_args['truth_depositions_MeV']   = np.concatenate(init_args['truth_depositions_MeV'])
+        
+        processed_args['sed_index']               = np.concatenate(init_args['sed_index'])
+        processed_args['sed_points']              = np.vstack(init_args['sed_points'])
+        processed_args['sed_depositions']         = np.concatenate(init_args['sed_depositions'])
         
         truth_interaction = cls(**processed_args)
         
