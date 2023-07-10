@@ -447,6 +447,12 @@ class AnaToolsManager:
                 self.initialize_flash_manager()
             if 'run_crt_tpc_matching' in self.ana_config['post_processing']:
                 self.initialize_crt_tpc_manager()
+                # If truth information is present, add it to the results dict
+                if 'truth_file_path' in self.ana_config['post_processing']['run_crt_tpc_matching']:
+                    truth_file_path = self.ana_config['post_processing']['run_crt_tpc_matching']['truth_file_path']
+                    tree_name = 'CRTTPCTruthEff/matchTree'
+                    branch_names = ['fEvent', 'track_trueID', 'crt_trueID']
+                    extract_ttree_data(truth_file_path, tree_name, branch_names, result)
             post_processor_interface = PostProcessor(data, result)
             # Gather post processing functions, register by priority
 
@@ -645,3 +651,41 @@ class AnaToolsManager:
             self.step(iteration)
             if self.profile:
                 self.log(iteration)
+
+
+    def extract_ttree_data(self, root_file_path, tree_name, branch_names, result):
+        """
+        Read selected branches from a ROOT ntuple and add them
+        to the results dictionary.
+
+        Parameters
+        ----------
+        root_file_path : str
+            Path to ROOT ntuple
+        tree_name : str
+            Name of the TTree to be read
+        branch_names : list
+            List of strings corresponding to the branches to be read from the TTree
+        result : dict
+            Results dictionary to be modified
+        """
+        import uproot
+
+        file = uproot.open(root_file_path)
+
+        tree = file[tree_name]
+
+        for branch_name in branch_names:
+            branch = tree[branch_name]
+            result[branch_name] = branch.array()
+
+        # Loop over the entries in the tree
+        for entry in tree:
+            # Extract values from the branches
+            values = [entry[name].array()[0] for name in branch_names]
+
+            # Unpack the values and add to the results_dict
+            true_trackID, true_crthitID = values
+            results_dict[true_trackID] = true_crthitID
+
+
