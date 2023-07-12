@@ -1,4 +1,7 @@
+import os
 import numpy as np
+import yaml
+import pickle
 from collections import defaultdict
 from analysis.post_processing import post_processing
 from mlreco.utils.globals import *
@@ -52,71 +55,49 @@ def run_crt_tpc_matching(data_dict, result_dict,
     with open(matcha_config_path, 'r') as file:
         matcha_config = yaml.safe_load(file)
 
-    matcha_output_file_path = matcha_config['save_file_path'] + matcha_config['save_file_name'] 
+    matcha_file_save_config = matcha_config['file_save_config']
+    file_path = matcha_file_save_config['save_file_path']
+    file_name = matcha_file_save_config['save_file_name']
+    matcha_output_file_path = file_path + file_name
     if not os.path.exists(matcha_output_file_path):
         raise FileNotFoundError("""
             matcha output file '{:s}' does not exist.\n
             Make sure to set a valid save_file_path and save_file_name in your matcha config file.
-        """).format(matcha_output_file_path
+        """).format(matcha_output_file_path)
 
-    with open(matcha_output_file, 'rb') as file:
+    with open(matcha_output_file_path, 'rb') as file:
         matcha_output_dict = pickle.load(file)
         track_list = matcha_output_dict['tracks']
         crthist_list = matcha_output_dict['crthits']
         match_list = matcha_output_dict['match_candidates']
 
-    for track in track_list:
-        track_dict_list.append(track.__dict__)
-    track_df = pd.DataFrame(track_dict_list)
+    assert all(isinstance(match, MatchCandidate) for match in match_list)
 
-    assert all(isinstance(item, MatchCandidate) for item in crt_tpc_matches)
+    for match in match_list:
+        matched_track_id = match.track_id
+        matched_track = None
+        for track in track_list:
+            if track.id == matched_track_id:
+                matched_track = track
+                break
+        if matched_track is None: continue
 
-    # crt_tpc_matches is a list of matcha.MatchCandidates. Each MatchCandidate
-    # contains a Track and CRTHit instance. The Track class contains the 
-    # interaction_id.
-    #matched_interaction_ids = [int_id for int_id in crt_tpc_matches.track.interaction_id]
-    #matched_interaction_ids = []
-    #for match in crt_tpc_matches:
-    #    matched_interaction_ids.append(match.track.interaction_id)
-    #
-    #matched_interactions = [i for i in interactions 
-    #                        if i.id in matched_interaction_ids]
-
-    # update_dict = defaultdict(list)
-
-    for match in crt_tpc_matches:
-        matched_track = match.track_id
-        # To modify the interaction in place, we need to find it in the interactions list
         matched_interaction = None
         for interaction in interactions:
             if matched_track.interaction_id == interaction.id:
                 matched_interaction = interaction
                 break
-        matched_crthit = match.crthit
-        # Sanity check
         if matched_interaction is None: continue
+
+        matched_crthit_id = match.crthit_id
         matched_interaction.crthit_matched = True
         matched_interaction.crthit_matched_particle_id = matched_track.id
-        matched_interaction.crthit_id = matched_crthit.id
+        matched_interaction.crthit_id = matched_crthit_id
 
         # update_dict['interactions'].append(matched_interaction)
     # update_dict['crt_tpc_matches'].append(crt_tpc_dict)
     print('Done CRT matching.')
     return {}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
