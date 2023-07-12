@@ -46,6 +46,29 @@ def run_crt_tpc_matching(data_dict, result_dict,
                                                           use_true_tpc_objects=False,
                                                           restrict_interactions=[])
 
+    # Get matcha output file path from the matcha config file. Load the relevant
+    # class instances from that file.
+    matcha_config_path = crt_tpc_manager.crt_tpc_config['matcha_config_path']
+    with open(matcha_config_path, 'r') as file:
+        matcha_config = yaml.safe_load(file)
+
+    matcha_output_file_path = matcha_config['save_file_path'] + matcha_config['save_file_name'] 
+    if not os.path.exists(matcha_output_file_path):
+        raise FileNotFoundError("""
+            matcha output file '{:s}' does not exist.\n
+            Make sure to set a valid save_file_path and save_file_name in your matcha config file.
+        """).format(matcha_output_file_path
+
+    with open(matcha_output_file, 'rb') as file:
+        matcha_output_dict = pickle.load(file)
+        track_list = matcha_output_dict['tracks']
+        crthist_list = matcha_output_dict['crthits']
+        match_list = matcha_output_dict['match_candidates']
+
+    for track in track_list:
+        track_dict_list.append(track.__dict__)
+    track_df = pd.DataFrame(track_dict_list)
+
     assert all(isinstance(item, MatchCandidate) for item in crt_tpc_matches)
 
     # crt_tpc_matches is a list of matcha.MatchCandidates. Each MatchCandidate
@@ -62,7 +85,7 @@ def run_crt_tpc_matching(data_dict, result_dict,
     # update_dict = defaultdict(list)
 
     for match in crt_tpc_matches:
-        matched_track = match.track
+        matched_track = match.track_id
         # To modify the interaction in place, we need to find it in the interactions list
         matched_interaction = None
         for interaction in interactions:
